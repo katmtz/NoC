@@ -109,7 +109,7 @@ module pts_fsm(clk, rst_b, pkt_avail, payload_avail, req, read_in, count);
 
   always_comb begin
     if (count == 4) count_in = 0;
-    else begin if (state == send || req)
+    else begin if (state == send || (req && state == load))
       count_in = count_r + 1;
     else
       count_in = 0;
@@ -136,7 +136,7 @@ module serialToPkt(clk, rst_b, payload, put, pkt, pkt_avail, free);
   parameter WIDTH = 32;
   input bit clk, rst_b, put;
   input bit [7:0] payload;
-  output bit pkt_avail, free;  
+  output logic pkt_avail, free;  
   output logic [31:0] pkt;
 
   bit [31:0] hold_in;

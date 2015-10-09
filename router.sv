@@ -250,7 +250,7 @@ module channel_sel(clk, rst_b,
   assign pkt_out_avail = (0),
          pkt_out = bfr;
 
-  assign req = (last_routed) ? use_p : 0;
+  assign req = (last_routed) ? use_p : 0;  // TODO: this is wrong. fix it.
 
 endmodule
 
