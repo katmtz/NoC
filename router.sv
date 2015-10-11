@@ -27,8 +27,11 @@ module router(clk, rst_b,
   logic [3:0] outbound_pkts_avail;
   pkt_t [3:0] inbound_pkts;          // from node, to channel_sel
   logic [3:0] inbound_pkts_avail;
-  logic [3:0] channel_req;           // request to in_buffer from channel_sel
   logic [3:0] load_out_ready;        // tell routing outbuffer couldn't read
+  logic [3:0][3:0] ob_pkt_pt_av;
+  pkt_t [3:0][3:0] ob_pkt_pt;
+  logic [3:0][3:0] req_p;
+  logic [3:0] req;
 
   // io buffers
   generate
@@ -45,26 +48,19 @@ module router(clk, rst_b,
                  .port_in_q_ready(free_inbound[i]),
                  .port_out_q_ready(load_out_ready[i]),
                  .node_in_ready(free_outbound[i]),
-                 .read_in(channel_req[i]));
+                 .read_in(req));
+      routing rt (.clk(clk), .rst_b(rst_b),
+                  .pkt_in(inbound_pkts[i]), .pkt_in_avail(inbound_pkts_avail[i]),
+                  .out_read(load_out_ready[i]),
+                  .req(req_p[i]),
+                  .out_data_avail(ob_pkt_pt_av[i]),
+                  .out_data(ob_pkt_pt[i]));
     end
   endgenerate
 
-  // packet handling and routing:
-  // IN_BUFFERS --> CHANNEL_SEL --> ROUTING --> OUT_BUFFERS
-  pkt_t pkt_to_route;              // CHANNEL_SEL --> ROUTING
-  logic pkt_to_route_avail;         
-  logic last_routed;               // ROUTING --> CHANNEL_SEL
-
-  routing rt (.clk(clk), .rst_b(rst_b),
-              .pkt_in(pkt_to_route), .pkt_in_avail(pkt_to_route_avail),
-              .out_read(load_out_ready),
-              .last_routed(last_routed),
-              .out_data_avail(outbound_pkts_avail),
-              .out_data(outbound_pkts));
-  channel_sel cs (.clk(clk), .rst_b(rst_b),
-                  .pkt_in(inbound_pkts), .pkt_in_avail(inbound_pkts_avail),
-                  .last_routed(last_routed), .req(channel_req),
-                  .pkt_out(pkt_to_route), .pkt_out_avail(pkt_to_route_avail)); 
+  assign req = (req_p[0] & req_p[1] & req_p[2] & req_p[3]);
+  assign outbound_pkts = (ob_pkt_pt[0] & ob_pkt_pt[1] & ob_pkt_pt[2] & ob_pkt_pt[3]);
+  assign outbound_pkts_avail = (ob_pkt_pt_av[0] & ob_pkt_pt_av[1] & ob_pkt_pt_av[2] & ob_pkt_pt_av[3]);
 
 endmodule
 
@@ -170,126 +166,22 @@ endmodule
  */
 
 /*
- * Decides which packet from inputs to use
- * - constantly see which nodes have packets available
- * - request new packet when last one has been sent (1cycle)
- */
-module channel_sel(clk, rst_b,
-                   pkt_in, pkt_in_avail, last_routed,
-                   pkt_out, pkt_out_avail, req);
-  parameter ROUTERID = 0;
-  input clk, rst_b;
-  input pkt_t [3:0] pkt_in;
-  input [3:0] pkt_in_avail;
-  input last_routed;
-  output pkt_t pkt_out;
-  output pkt_out_avail;
-  output [3:0] req;
-
-  // round-robin-esque scheduling, starting from 0
-  logic [3:0] use_p;   // one-hot port use
-  reg [3:0][5:0] p_wait;
-  reg [3:0] p_used;
-
-  logic [3:0] p_choices;
-  always_comb begin // the always_comb from heeeellllll............
-    if (pkt_in_avail == 3'b0) p_choices = 4'b0;
-    if (pkt_in_avail[0] == 1'b1) 
-      p_choices[0] = (p_wait[0] >= p_wait[1] 
-                  && p_wait[0] >= p_wait[2]
-                  && p_wait [0] >= p_wait[3]) ? 1'b1 : 1'b0;    
-    if (pkt_in_avail[1] == 1'b1)
-      p_choices[1] = (p_wait[1] > p_wait[0]
-                  && p_wait[1] >= p_wait[2]
-                  && p_wait[1] >= p_wait[3]) ? 1'b1 : 1'b0;
-    if (pkt_in_avail[2] == 1'b1)
-      p_choices[2] = (p_wait[2] > p_wait[0]
-                  && p_wait[2] > p_wait[1]
-                  && p_wait[2] >= p_wait[3]) ? 1'b1 : 1'b0;
-    if (pkt_in_avail[3] == 1'b1)
-      p_choices[3] = (p_wait[3] > p_wait[0]
-                  && p_wait[3] > p_wait[1]
-                  && p_wait[3] > p_wait[2]) ? 1'b1 : 1'b0;
-  end
-  always_comb begin
-    if (p_choices >= 8)
-        use_p = 4'b1000;
-    else begin
-      if (p_choices >= 4)
-        use_p = 4'b0100;
-      else begin
-        if (p_choices >= 2)
-          use_p = 4'b0010;
-        else begin
-          if (p_choices >= 1)
-            use_p = 4'b0001;
-          else
-            use_p = 4'b0;
-        end
-      end
-    end
-  end
-
-  always_ff @(posedge clk, negedge rst_b) begin  
-    // increment wait count unless invalid or last used
-    if (~rst_b) p_wait <= 0;
-    else begin
-      p_wait[0] <= (use_p[0] || !pkt_in_avail[0]) ? 0 : p_wait[0] + 1;
-      p_wait[1] <= (use_p[1] || !pkt_in_avail[1]) ? 0 : p_wait[1] + 1;
-      p_wait[2] <= (use_p[2] || !pkt_in_avail[2]) ? 0 : p_wait[2] + 1;
-      p_wait[3] <= (use_p[3] || !pkt_in_avail[3]) ? 0 : p_wait[3] + 1;
-    end
-  end
-
-  // hold last use_p val to reset p_wait at next cycle
-  always_ff @(posedge clk, negedge rst_b) begin
-    if (~rst_b) p_used <= 0;
-    else p_used <= use_p;
-  end
-
-  // store new packet when the last one has been sent
-  reg [31:0] bfr;
-  pkt_t channel;
-
-  always_comb
-    case(use_p)
-      4'b0001: channel = pkt_in[0];
-      4'b0010: channel = pkt_in[1];
-      4'b0100: channel = pkt_in[2];
-      4'b1000: channel = pkt_in[3];
-      default: channel = 0;
-   endcase 
-
-  always_ff @(posedge clk, negedge rst_b) begin
-    if (~rst_b) bfr <= 0;
-    else bfr <= (last_routed) ? channel : bfr;
-  end
-
-  // packet is available whenever buf has a value
-  assign pkt_out_avail = (bfr != 0),
-         pkt_out = bfr;
-
-  assign req = use_p;
-
-endmodule
-
-/*
  * Gets a packet and pushes it and a valid bit to the an array of 4 pkts
  * - register holds pkt until recieved signal?
  */
 module routing(clk, rst_b,
                pkt_in, pkt_in_avail, out_read,
-               out_data, out_data_avail, last_routed);
+               out_data, out_data_avail, req);
   parameter ROUTERID = 0;
   input clk, rst_b, pkt_in_avail;
   input pkt_t pkt_in;
   input [3:0] out_read;                   // one-hot indication that packet went through
-  output last_routed;
-  output bit [3:0] out_data_avail;
-  output pkt_t [3:0] out_data;
+  output req;
+  output bit  out_data_avail;
+  output pkt_t out_data;
 
   logic [2:0] send_node;
-  out_node #(ROUTERID) (.*);
+  get_send_node #(ROUTERID) (.*);
 
   // indicate whether the packet last sent got through
   reg read;
@@ -298,8 +190,7 @@ module routing(clk, rst_b,
     else        read <= (out_read != 0) ? 1'b1 : 1'b0;
   end
 
-  // assign outbound vals
-  assign last_routed = read;
+  assign req = read;
 
   always_comb
     case(send_node)
@@ -326,7 +217,7 @@ endmodule
 /*
  * Takes in a packet, determines which node to send it to.
  */
-module out_node(clk, rst_b,
+module get_send_node(clk, rst_b,
                pkt_in, pkt_in_avail,
                send_node);
   parameter ROUTERID = 0;
