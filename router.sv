@@ -27,11 +27,14 @@ module router(clk, rst_b,
   logic [3:0] outbound_pkts_avail;
   pkt_t [3:0] inbound_pkts;          // from node, to channel_sel
   logic [3:0] inbound_pkts_avail;
-  logic [3:0] load_out_ready;        // tell routing outbuffer couldn't read
-  logic [3:0][3:0] ob_pkt_pt_av;
-  pkt_t [3:0][3:0] ob_pkt_pt;
-  logic [3:0][3:0] req_p;
+  logic [3:0] out_queue_ready;        // tell routing outbuffer couldn't read
+  logic [3:0][3:0] ob_pkts_packed_avail;
+  pkt_t [3:0][3:0] ob_pkts_packed;
+  logic [3:0][3:0] ob_pkts_sorted_avail;
+  pkt_t [3:0][3:0] ob_pkts_sorted;
   logic [3:0] req;
+  logic [3:0][3:0] read;
+  logic [3:0] read_sorted;
 
   // io buffers
   generate
@@ -46,27 +49,42 @@ module router(clk, rst_b,
                  .pkt_out(inbound_pkts[i]),
                  .pkt_out_avail(inbound_pkts_avail[i]),
                  .port_in_q_ready(free_inbound[i]),
-                 .port_out_q_ready(load_out_ready[i]),
+                 .port_out_q_ready(out_queue_ready[i]),
                  .node_in_ready(free_outbound[i]),
                  .read_in(req[i]));
       routing rt (.clk(clk), .rst_b(rst_b),
                   .pkt_in(inbound_pkts[i]), .pkt_in_avail(inbound_pkts_avail[i]),
-                  .out_read(load_out_ready[i]),
-                  .req(req_p[i]),
-                  .out_data_avail(ob_pkt_pt_av[i]),
-                  .out_data(ob_pkt_pt[i]));
+                  .out_read(read_sorted[i]),
+                  .req(req[i]),
+                  .out_data_avail(ob_pkts_packed_avail[i]),
+                  .out_data(ob_pkts_packed[i]));
+      handle_pkts sort(.clk(clk), .rst_b(rst_b),
+                       .pkts_in(ob_pkts_sorted[i]), .pkts_avail(ob_pkts_sorted_avail[i]),
+                       .pkt_out(outbound_pkts[i]), .pkt_out_avail(outbound_pkts_avail[i]),
+                       .pkt_accept(read[i]), .busy(out_queue_ready[i]));
+
+      always_comb begin
+        ob_pkts_sorted[i] = {ob_pkts_packed[3][i], 
+                             ob_pkts_packed[2][i], 
+                             ob_pkts_packed[1][i], 
+                             ob_pkts_packed[0][i]};
+        ob_pkts_sorted_avail[i] = {ob_pkts_packed_avail[3][i],
+                                   ob_pkts_packed_avail[2][i],
+                                   ob_pkts_packed_avail[1][i],
+                                   ob_pkts_packed_avail[0][i]};
+        read_sorted[i] = read[0][i] | read[1][i] | read[2][i] | read[3][i];
+      end
     end
   endgenerate
 
-  assign req = (req_p[0] | req_p[1] | req_p[2] | req_p[3]);
-  assign outbound_pkts = (ob_pkt_pt[0] | ob_pkt_pt[1] | ob_pkt_pt[2] | ob_pkt_pt[3]);
-  assign outbound_pkts_avail = (ob_pkt_pt_av[0] | ob_pkt_pt_av[1] | ob_pkt_pt_av[2] | ob_pkt_pt_av[3]);
-
 endmodule
 
+/*
+ * hands packets to node one by one
+ */
 module handle_pkts(clk, rst_b,
-                   pkts_in, pkts_in_avail,
-                   pkt_out, pkt_out,
+                   pkts_in, pkts_avail,
+                   pkt_out, pkt_out_avail,
                    pkt_accept, busy);
   input logic clk, rst_b;
   input logic busy;                    // from outbuffer - currently routing a packet out
@@ -74,12 +92,42 @@ module handle_pkts(clk, rst_b,
   input logic [3:0] pkts_avail;
   output logic [3:0] pkt_accept;
   output pkt_t pkt_out;
-  output logic pkt_out;
+  output logic pkt_out_avail;
 
-  
+  reg [3:0] last_used;
+ 
+  always_comb begin
+    if (pkts_avail[0] == 1'b1 && !last_used[0]) begin
+      pkt_out = pkts_in[0];
+      pkt_out_avail = 1'b1;
+      pkt_accept = 4'b0001;
+    end else begin
+    if (pkts_avail[1] == 1'b1 && !last_used[1]) begin
+      pkt_out = pkts_in[1];
+      pkt_out_avail = 1'b1;
+      pkt_accept = 4'b0010;
+    end else begin
+    if (pkts_avail[2] == 1'b1 && !last_used[2]) begin
+      pkt_out = pkts_in[2];
+      pkt_out_avail = 1'b1;
+      pkt_accept = 4'b0100;
+    end else begin
+    if (pkts_avail[3] == 1'b1 && !last_used[3]) begin
+      pkt_out = pkts_in[3];
+      pkt_out_avail = 1'b1;
+      pkt_accept = 4'b1000;
+    end else begin
+      pkt_out = 0;
+      pkt_out_avail = 1'b0;
+      pkt_accept = 4'b00;
+    end end end end
+  end
 
-                   
-
+  always_ff @(posedge clk, posedge rst_b) begin
+    if (~rst_b) last_used <= 0;
+    else last_used <= pkt_accept;
+  end
+endmodule
 
 /* **********************************************
  * I/O BUFFERS
@@ -88,7 +136,7 @@ module handle_pkts(clk, rst_b,
 
 /*
  * wrapper holding input and output buffers to be connected
- * to channel_sel, routing, and node
+ * to handle_pkts, routing, and node
  */
 module io_buffer(clk, rst_b,
                  payload_in, payload_in_avail,
@@ -193,7 +241,7 @@ module routing(clk, rst_b,
   input clk, rst_b, pkt_in_avail;
   input pkt_t pkt_in;
   input out_read;                   // one-hot indication that packet went through
-  output [3:0] req;
+  output req;
   output bit  [3:0] out_data_avail;
   output pkt_t [3:0] out_data;
 
