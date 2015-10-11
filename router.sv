@@ -52,7 +52,7 @@ module router(clk, rst_b,
                  .port_out_q_ready(out_queue_ready[i]),
                  .node_in_ready(free_outbound[i]),
                  .read_in(req[i]));
-      routing rt (.clk(clk), .rst_b(rst_b),
+      routing #(ROUTERID) rt (.clk(clk), .rst_b(rst_b),
                   .pkt_in(inbound_pkts[i]), .pkt_in_avail(inbound_pkts_avail[i]),
                   .out_read(read_sorted[i]),
                   .req(req[i]),
@@ -290,11 +290,9 @@ module get_send_node(clk, rst_b,
   input pkt_t pkt_in;
   output logic [2:0] send_node;
 
-  logic dest_rtr;
-  assign dest_rtr = (pkt_in.destID > 4'd3);
   always_comb begin
     if (pkt_in_avail) begin
-      if (ROUTERID == 0)
+      if (ROUTERID[0] == 0)
         case(pkt_in.destID)
           0: send_node = 0;
           1: send_node = 2;
