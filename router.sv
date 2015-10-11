@@ -48,7 +48,7 @@ module router(clk, rst_b,
                  .port_in_q_ready(free_inbound[i]),
                  .port_out_q_ready(load_out_ready[i]),
                  .node_in_ready(free_outbound[i]),
-                 .read_in(req));
+                 .read_in(req[i]));
       routing rt (.clk(clk), .rst_b(rst_b),
                   .pkt_in(inbound_pkts[i]), .pkt_in_avail(inbound_pkts_avail[i]),
                   .out_read(load_out_ready[i]),
@@ -58,11 +58,28 @@ module router(clk, rst_b,
     end
   endgenerate
 
-  assign req = (req_p[0] & req_p[1] & req_p[2] & req_p[3]);
-  assign outbound_pkts = (ob_pkt_pt[0] & ob_pkt_pt[1] & ob_pkt_pt[2] & ob_pkt_pt[3]);
-  assign outbound_pkts_avail = (ob_pkt_pt_av[0] & ob_pkt_pt_av[1] & ob_pkt_pt_av[2] & ob_pkt_pt_av[3]);
+  assign req = (req_p[0] | req_p[1] | req_p[2] | req_p[3]);
+  assign outbound_pkts = (ob_pkt_pt[0] | ob_pkt_pt[1] | ob_pkt_pt[2] | ob_pkt_pt[3]);
+  assign outbound_pkts_avail = (ob_pkt_pt_av[0] | ob_pkt_pt_av[1] | ob_pkt_pt_av[2] | ob_pkt_pt_av[3]);
 
 endmodule
+
+module handle_pkts(clk, rst_b,
+                   pkts_in, pkts_in_avail,
+                   pkt_out, pkt_out,
+                   pkt_accept, busy);
+  input logic clk, rst_b;
+  input logic busy;                    // from outbuffer - currently routing a packet out
+  input pkt_t [3:0] pkts_in;
+  input logic [3:0] pkts_avail;
+  output logic [3:0] pkt_accept;
+  output pkt_t pkt_out;
+  output logic pkt_out;
+
+  
+
+                   
+
 
 /* **********************************************
  * I/O BUFFERS
@@ -175,22 +192,22 @@ module routing(clk, rst_b,
   parameter ROUTERID = 0;
   input clk, rst_b, pkt_in_avail;
   input pkt_t pkt_in;
-  input [3:0] out_read;                   // one-hot indication that packet went through
-  output req;
-  output bit  out_data_avail;
-  output pkt_t out_data;
+  input out_read;                   // one-hot indication that packet went through
+  output [3:0] req;
+  output bit  [3:0] out_data_avail;
+  output pkt_t [3:0] out_data;
 
   logic [2:0] send_node;
   get_send_node #(ROUTERID) (.*);
 
-  // indicate whether the packet last sent got through
+  // indicate whether the outbound buffer was full when we tried to send the last one
   reg read;
   always_ff @(posedge clk, negedge rst_b) begin
-    if (~rst_b) read <= 0;
+    if (~rst_b) read <= 1;
     else        read <= (out_read != 0) ? 1'b1 : 1'b0;
   end
 
-  assign req = read;
+  assign req = read && pkt_in_avail;
 
   always_comb
     case(send_node)
