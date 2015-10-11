@@ -188,37 +188,56 @@ module channel_sel(clk, rst_b,
 
   // round-robin-esque scheduling, starting from 0
   logic [3:0] use_p;   // one-hot port use
-  reg [3:0][3:0] p_wait;
+  reg [3:0][5:0] p_wait;
   reg [3:0] p_used;
 
+  logic [3:0] p_choices;
   always_comb begin // the always_comb from heeeellllll............
-    if (pkt_in_avail == 3'b0) use_p = 3'b0;
+    if (pkt_in_avail == 3'b0) p_choices = 4'b0;
     if (pkt_in_avail[0] == 1'b1) 
-      use_p[0] = (p_wait[0] >= p_wait[1] 
+      p_choices[0] = (p_wait[0] >= p_wait[1] 
                   && p_wait[0] >= p_wait[2]
-                  && p_wait [0] >= p_wait[3]) ? 1'b1 : 1'b0;
+                  && p_wait [0] >= p_wait[3]) ? 1'b1 : 1'b0;    
     if (pkt_in_avail[1] == 1'b1)
-      use_p[1] = (p_wait[1] > p_wait[0]
+      p_choices[1] = (p_wait[1] > p_wait[0]
                   && p_wait[1] >= p_wait[2]
                   && p_wait[1] >= p_wait[3]) ? 1'b1 : 1'b0;
     if (pkt_in_avail[2] == 1'b1)
-      use_p[2] = (p_wait[2] > p_wait[0]
+      p_choices[2] = (p_wait[2] > p_wait[0]
                   && p_wait[2] > p_wait[1]
                   && p_wait[2] >= p_wait[3]) ? 1'b1 : 1'b0;
     if (pkt_in_avail[3] == 1'b1)
-      use_p[3] = (p_wait[3] > p_wait[0]
+      p_choices[3] = (p_wait[3] > p_wait[0]
                   && p_wait[3] > p_wait[1]
                   && p_wait[3] > p_wait[2]) ? 1'b1 : 1'b0;
-   end
+  end
+  always_comb begin
+    if (p_choices >= 8)
+        use_p = 4'b1000;
+    else begin
+      if (p_choices >= 4)
+        use_p = 4'b0100;
+      else begin
+        if (p_choices >= 2)
+          use_p = 4'b0010;
+        else begin
+          if (p_choices >= 1)
+            use_p = 4'b0001;
+          else
+            use_p = 4'b0;
+        end
+      end
+    end
+  end
 
   always_ff @(posedge clk, negedge rst_b) begin  
     // increment wait count unless invalid or last used
-    if (~rst_b) p_wait = 0;
+    if (~rst_b) p_wait <= 0;
     else begin
-      p_wait[0] = (p_used[0] || !pkt_in_avail[0]) ? 0 : p_wait[0] + 1;
-      p_wait[1] = (p_used[1] || !pkt_in_avail[1]) ? 0 : p_wait[1] + 1;
-      p_wait[2] = (p_used[2] || !pkt_in_avail[2]) ? 0 : p_wait[2] + 1;
-      p_wait[3] = (p_used[3] || !pkt_in_avail[3]) ? 0 : p_wait[3] + 1;
+      p_wait[0] <= (use_p[0] || !pkt_in_avail[0]) ? 0 : p_wait[0] + 1;
+      p_wait[1] <= (use_p[1] || !pkt_in_avail[1]) ? 0 : p_wait[1] + 1;
+      p_wait[2] <= (use_p[2] || !pkt_in_avail[2]) ? 0 : p_wait[2] + 1;
+      p_wait[3] <= (use_p[3] || !pkt_in_avail[3]) ? 0 : p_wait[3] + 1;
     end
   end
 
@@ -247,10 +266,10 @@ module channel_sel(clk, rst_b,
   end
 
   // packet is available whenever buf has a value
-  assign pkt_out_avail = (0),
+  assign pkt_out_avail = (bfr != 0),
          pkt_out = bfr;
 
-  assign req = (last_routed) ? use_p : 0;  // TODO: this is wrong. fix it.
+  assign req = use_p;
 
 endmodule
 
@@ -313,10 +332,29 @@ module out_node(clk, rst_b,
   parameter ROUTERID = 0;
   input clk, rst_b, pkt_in_avail;
   input pkt_t pkt_in;
-  output [2:0] send_node;
+  output logic [2:0] send_node;
 
-  logic [3:0] dest;
-  assign dest = pkt_in.sourceID,
-         send_node = (dest == ROUTERID) ? dest + 1 : 0; // TODO: fix this to work for both router ids!!
+  logic dest_rtr;
+  assign dest_rtr = (pkt_in.destID > 4'd3);
+  always_comb begin
+    if (pkt_in_avail) begin
+      if (ROUTERID == 0)
+        case(pkt_in.destID)
+          0: send_node = 0;
+          1: send_node = 2;
+          2: send_node = 3;
+          default: send_node = 1;
+        endcase
+      else
+        case(pkt_in.destID)
+          3: send_node = 0;
+          4: send_node = 1;
+          5: send_node = 2;
+          default: send_node = 3;
+        endcase  
+    end
+    else
+      send_node = 2'b0;
+  end
 
 endmodule
