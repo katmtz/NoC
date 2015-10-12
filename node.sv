@@ -203,7 +203,7 @@ module fifo(clk, rst_b, data_in, we, re, full, empty, data_out);
       count <= 0; w_ptr <= 0; r_ptr <= 0; Q <= 0;
     end
     else begin
-      if (re && we && count == 1) begin 
+      if (re && we && count >= 1) begin 
          Q[w_ptr] <= data_in;
          count <= count;
          w_ptr <= w_ptr + 1;
