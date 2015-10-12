@@ -195,7 +195,7 @@ module fifo(clk, rst_b, data_in, we, re, full, empty, data_out);
   reg [1:0] w_ptr, r_ptr;
   reg [2:0] count;
 
-  assign full = (count == 3'd4),
+  assign full = (count == 3'd4 && ~re),
          empty = (count == 3'd0);
   
   always_ff @(posedge clk, negedge rst_b) begin
