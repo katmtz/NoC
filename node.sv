@@ -225,3 +225,49 @@ module fifo(clk, rst_b, data_in, we, re, full, empty, data_out);
   assign data_out = Q[r_ptr];
 
 endmodule
+
+module big_fifo(clk, rst_b, data_in, we, re, full, empty, data_out);
+  parameter WIDTH = 32;
+  input clk, rst_b;
+  input [WIDTH-1:0] data_in;
+  input we; //write enable
+  input re; //read enable
+  output full;
+  output empty;
+  output bit [WIDTH-1:0] data_out;
+
+  reg [7:0][WIDTH-1:0] Q;
+  reg [2:0] w_ptr, r_ptr;
+  reg [3:0] count;
+
+  assign full = (count == 4'd8 && ~re),
+         empty = (count == 4'd0);
+
+  always_ff @(posedge clk, negedge rst_b) begin
+    if (~rst_b) begin
+      count <= 0; w_ptr <= 0; r_ptr <= 0; Q <= 0;
+    end
+    else begin
+      if (re && we && count >= 1) begin
+         Q[w_ptr] <= data_in;
+         count <= count;
+         w_ptr <= w_ptr + 1;
+         r_ptr <= r_ptr + 1;
+      end else begin
+      if (we && !full) begin
+        Q[w_ptr] <= data_in;
+        count <= count + 1;
+        w_ptr <= w_ptr + 1;
+      end
+      if (re && !empty) begin
+        count <= count - 1;
+        r_ptr <= r_ptr + 1;
+      end
+    end
+    end
+  end
+
+  assign data_out = Q[r_ptr];
+
+endmodule
+

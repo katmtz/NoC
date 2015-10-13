@@ -189,7 +189,7 @@ module in_buffer(clk, rst_b,
   logic q_empty, free;
 
   serialToPkt stp (.*);
-  fifo q (.clk(clk), .rst_b(rst_b),
+  big_fifo q (.clk(clk), .rst_b(rst_b),
           .data_in(pkt), .we(pkt_avail),
           .re(req), .full(full), .empty(q_empty),
           .data_out(pkt_out));
@@ -214,7 +214,7 @@ module out_buffer(clk, rst_b,
   bit read_in, q_empty, pkt_out_avail;
   assign pkt_out_avail = ~q_empty;
 
-  fifo q (.clk(clk), .rst_b(rst_b),
+  big_fifo q (.clk(clk), .rst_b(rst_b),
           .data_in(pkt), .we(pkt_avail),
           .re(read_in), .full(full), .empty(q_empty),
           .data_out(pkt_out));
